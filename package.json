@@ -1,0 +1,32 @@
+{
+  "name": "study-hard",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A private, local-first flashcard app that reads Anki and open deck packages and renders math with MathJax.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/copy-mathjax.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-mathjax.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "dexie": "^4.4.6",
+    "fflate": "^0.8.3",
+    "fzstd": "^0.1.1",
+    "mathjax": "^3.2.2",
+    "sql.js": "^1.14.2",
+    "ts-fsrs": "^5.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/sql.js": "^1.4.11",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  }
+}

@@ -6,6 +6,8 @@ import { loadSettings, saveSettings, type Settings } from "./scheduler";
 import { deckTree, deleteDeck, exportCrowdAnki, saveBundle } from "./store";
 import { download, h, toast } from "./ui/dom";
 import { mountStudy } from "./ui/study";
+import { getStatus, initSync, syncEvents } from "./sync";
+import { openSyncDialog, statusLabel } from "./ui/syncDialog";
 
 const view = document.getElementById("view")!;
 let cleanup: (() => void) | undefined;
@@ -261,6 +263,22 @@ window.addEventListener("drop", (e) => {
   document.body.classList.remove("dragging");
   if (e.dataTransfer?.files.length) void importFileList(e.dataTransfer.files);
 });
+
+// ----------------------------------------------------------------- sync --
+
+const chip = document.getElementById("sync-chip")!;
+const renderChip = () => {
+  chip.textContent = statusLabel();
+  chip.dataset.state = getStatus().state;
+};
+syncEvents.addEventListener("status", renderChip);
+// Refresh the deck list when another device's changes arrive.
+syncEvents.addEventListener("pulled", () => {
+  if (!cleanup) void showHome();
+});
+chip.addEventListener("click", openSyncDialog);
+window.setInterval(renderChip, 30_000);
+void initSync().catch((err) => console.error("Sync setup failed", err));
 
 applyTheme(getTheme());
 document.getElementById("home-link")!.addEventListener("click", (e) => {

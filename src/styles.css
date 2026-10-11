@@ -130,6 +130,18 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 }
 .brand { font-weight: 700; font-size: 17px; color: var(--text); text-decoration: none; }
 .tagline { color: var(--muted); font-size: 13px; }
+.sync-chip {
+  margin-left: auto; align-self: center; font-size: 13px; padding: 4px 12px;
+  border-radius: 999px; background: var(--bg); color: var(--muted);
+}
+.sync-chip::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 7px; background: var(--muted); vertical-align: 1px;
+}
+.sync-chip[data-state="idle"]::before { background: var(--review); }
+.sync-chip[data-state="syncing"]::before { background: var(--new); }
+.sync-chip[data-state="error"]::before, .sync-chip[data-state="mismatch"]::before { background: var(--danger); }
+.sync-chip[data-state="error"], .sync-chip[data-state="mismatch"] { color: var(--danger); }
 
 #view {
   flex: 1;
@@ -236,7 +248,19 @@ dialog h2 { margin: 0 0 16px; font-size: 18px; }
 .field input, .field select {
   width: 110px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
 }
-.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dialog-head h2 { margin: 0; }
+.close { padding: 4px 10px; }
+.sync-dialog { width: min(460px, calc(100vw - 32px)); }
+.stack p { margin: 0 0 12px; }
+.stacked { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.stacked input {
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); width: 100%;
+}
+.error-text { color: var(--danger); }
+button.danger { color: var(--danger); }
+.small-link { font-size: 13px; color: var(--muted); margin-top: 12px; }
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px);

@@ -1,5 +1,6 @@
 import type { Grade } from "ts-fsrs";
 import { db } from "../db";
+import { getMediaBlob } from "../mediaStore";
 import type { CardRecord, Note, Notetype } from "../model";
 import { CardFrame } from "../render/cardFrame";
 import { inlineMedia, type MediaLookup } from "../render/media";
@@ -13,13 +14,13 @@ const dataUrls = new Map<string, string>();
 const mediaLookup: MediaLookup = async (name) => {
   const hit = dataUrls.get(name);
   if (hit) return hit;
-  const rec = await db.media.get(name);
-  if (!rec) return undefined;
+  const blob = await getMediaBlob(name);
+  if (!blob) return undefined;
   const url = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(rec.data);
+    reader.readAsDataURL(blob);
   });
   if (dataUrls.size > 300) dataUrls.delete(dataUrls.keys().next().value!);
   dataUrls.set(name, url);

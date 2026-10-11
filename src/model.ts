@@ -56,7 +56,8 @@ export interface CardRecord {
 }
 
 export interface ReviewRecord {
-  id?: number;
+  /** Random UUID, so reviews from different devices never collide. */
+  id: string;
   cardId: string;
   deck: string;
   time: number;
@@ -66,7 +67,11 @@ export interface ReviewRecord {
 
 export interface MediaRecord {
   name: string;
-  data: Blob;
+  /** Absent until a file synced from another device is first needed. */
+  data?: Blob;
+  size?: number;
+  /** Path of the file in the sync storage bucket, below the user's folder. */
+  remotePath?: string;
 }
 
 /** Result of reading any package format, before it is stored. */

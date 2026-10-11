@@ -4,9 +4,11 @@
 import { zipSync } from "fflate";
 import type { Grade } from "ts-fsrs";
 import { db } from "./db";
+import { getMediaBlob } from "./mediaStore";
 import { buildCrowdAnki } from "./importers/crowdanki";
 import type { CardRecord, ImportBundle, Note, ReviewRecord } from "./model";
 import { referencedMedia } from "./render/media";
+import { track } from "./sync/tracking";
 import { answer, dayStart, newSchedule, type Settings } from "./scheduler";
 
 const LEARN_AHEAD_MS = 20 * 60_000;
@@ -36,7 +38,7 @@ export async function saveBundle(bundle: ImportBundle): Promise<ImportSummary> {
   const now = new Date();
   const ids = bundle.cards.map((c) => `${c.noteGuid}:${c.ord}`);
   let newCards = 0;
-  await db.transaction("rw", [db.notetypes, db.notes, db.cards, db.media], async () => {
+  await db.transaction("rw", [db.notetypes, db.notes, db.cards, db.media, db.outbox], async () => {
     await db.notetypes.bulkPut(bundle.notetypes);
     await db.notes.bulkPut(bundle.notes);
     const existing = await db.cards.bulkGet(ids);
@@ -58,8 +60,16 @@ export async function saveBundle(bundle: ImportBundle): Promise<ImportSummary> {
     });
     await db.cards.bulkPut(records);
     await db.media.bulkPut(
-      [...bundle.media].map(([name, data]) => ({ name, data: new Blob([data as BlobPart], { type: mimeFor(name) }) })),
+      [...bundle.media].map(([name, data]) => ({
+        name,
+        data: new Blob([data as BlobPart], { type: mimeFor(name) }),
+        size: data.byteLength,
+      })),
     );
+    await track(db, "notetypes", bundle.notetypes.map((n) => n.id));
+    await track(db, "notes", bundle.notes.map((n) => n.guid));
+    await track(db, "cards", ids);
+    await track(db, "media", bundle.media.keys());
   });
   return {
     notes: bundle.notes.length,
@@ -94,7 +104,7 @@ async function cardsIn(deck: string): Promise<CardRecord[]> {
 
 async function todaysReviews(deck: string, settings: Settings): Promise<ReviewRecord[]> {
   const since = dayStart(settings);
-  return (await db.reviews.where("time").aboveOrEqual(since).toArray()).filter((r) => inDeck(r.deck, deck));
+  return (await db.revlog.where("time").aboveOrEqual(since).toArray()).filter((r) => inDeck(r.deck, deck));
 }
 
 function countCards(cards: CardRecord[], today: ReviewRecord[], settings: Settings, now: number): DeckCounts {
@@ -115,7 +125,7 @@ function countCards(cards: CardRecord[], today: ReviewRecord[], settings: Settin
 
 export async function deckTree(settings: Settings): Promise<DeckNode[]> {
   const cards = await db.cards.toArray();
-  const today = await db.reviews.where("time").aboveOrEqual(dayStart(settings)).toArray();
+  const today = await db.revlog.where("time").aboveOrEqual(dayStart(settings)).toArray();
   const names = new Set<string>();
   for (const c of cards) {
     const parts = c.deck.split("::");
@@ -172,48 +182,62 @@ export async function nextCard(deck: string, settings: Settings, skip?: string):
 
 export interface UndoEntry {
   card: CardRecord;
-  reviewId: number;
+  reviewId: string;
 }
 
 export async function recordAnswer(card: CardRecord, rating: Grade, settings: Settings): Promise<UndoEntry> {
   const now = new Date();
   const updated = { ...card, sched: answer(card.sched, rating, settings, now) };
-  let reviewId = 0;
-  await db.transaction("rw", [db.cards, db.reviews], async () => {
+  const reviewId = crypto.randomUUID();
+  await db.transaction("rw", [db.cards, db.revlog, db.outbox], async () => {
     await db.cards.put(updated);
-    reviewId = await db.reviews.add({
+    await db.revlog.add({
+      id: reviewId,
       cardId: card.id,
       deck: card.deck,
       time: now.getTime(),
       rating,
       prevState: card.sched.state,
     });
+    await track(db, "cards", [card.id]);
+    await track(db, "revlog", [reviewId]);
   });
   return { card, reviewId };
 }
 
 export async function undo(entry: UndoEntry): Promise<void> {
-  await db.transaction("rw", [db.cards, db.reviews], async () => {
+  await db.transaction("rw", [db.cards, db.revlog, db.outbox], async () => {
     await db.cards.put(entry.card);
-    await db.reviews.delete(entry.reviewId);
+    await db.revlog.delete(entry.reviewId);
+    await track(db, "cards", [entry.card.id]);
+    await track(db, "revlog", [entry.reviewId]);
   });
 }
 
 export async function setSuspended(card: CardRecord, suspended: boolean): Promise<void> {
-  await db.cards.update(card.id, { suspended });
+  await db.transaction("rw", [db.cards, db.outbox], async () => {
+    await db.cards.update(card.id, { suspended });
+    await track(db, "cards", [card.id]);
+  });
 }
 
 // ------------------------------------------------------ delete / export --
 
 export async function deleteDeck(deck: string): Promise<void> {
-  await db.transaction("rw", [db.cards, db.notes, db.reviews], async () => {
+  await db.transaction("rw", [db.cards, db.notes, db.revlog, db.outbox], async () => {
     const cards = await cardsIn(deck);
-    await db.cards.bulkDelete(cards.map((c) => c.id));
+    const cardIds = cards.map((c) => c.id);
+    await db.cards.bulkDelete(cardIds);
     const guids = [...new Set(cards.map((c) => c.noteGuid))];
     const stillUsed = await db.cards.where("noteGuid").anyOf(guids).toArray();
     const used = new Set(stillUsed.map((c) => c.noteGuid));
-    await db.notes.bulkDelete(guids.filter((g) => !used.has(g)));
-    await db.reviews.where("cardId").anyOf(cards.map((c) => c.id)).delete();
+    const orphanNotes = guids.filter((g) => !used.has(g));
+    await db.notes.bulkDelete(orphanNotes);
+    const reviewIds = (await db.revlog.where("cardId").anyOf(cardIds).primaryKeys()) as string[];
+    await db.revlog.bulkDelete(reviewIds);
+    await track(db, "cards", cardIds);
+    await track(db, "notes", orphanNotes);
+    await track(db, "revlog", reviewIds);
   });
 }
 
@@ -231,7 +255,11 @@ export async function exportCrowdAnki(deck: string): Promise<Uint8Array> {
     referencedMedia(nt.css).forEach((m) => wanted.add(m));
     nt.templates.forEach((t) => referencedMedia(t.qfmt + t.afmt).forEach((m) => wanted.add(m)));
   });
-  const media = (await db.media.bulkGet([...wanted])).filter((m) => !!m);
+  const media: { name: string; data: Blob }[] = [];
+  for (const name of wanted) {
+    const data = await getMediaBlob(name);
+    if (data) media.push({ name, data });
+  }
 
   const dir = deck.replace(/::/g, " - ").replace(/[\\/:*?"<>|]/g, "_");
   const json = buildCrowdAnki({
